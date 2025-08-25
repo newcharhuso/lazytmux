@@ -1,6 +1,7 @@
 # Tmux Manager
 
-A tmux manager that lets you create, rename and delete tmux sessions and create custom templates for future use.
+A tmux manager that lets you create, rename and delete tmux sessions and create custom templates for future use. I created this for my personal use in my free time
+but I thought this could be useful to others too so you are here now.
 
 ## Features
 
@@ -47,6 +48,31 @@ Show help and supported options:
 ```bash
 ./lazytmux -h
 ```
+
+#### The way I use it
+
+My main terminal is Kitty so I installed Foot terminal alongside it to use it tool. I use this Hyprland keybind:
+
+```
+bind = $mainMod, t, exec, foot
+```
+
+and 2 windowrules:
+
+```
+windowrule = float , class:^(foot)$
+windowrule = size 1031 568 center, class:^(foot)$
+```
+
+and in my .zshrc:
+
+```
+source /home/husnu/nixos/modules/tmux/tmux_session_trigger.sh
+```
+
+This way it launches as a floating window and automatically closes after I attach a session.
+I know this is not practical setup but I wanted it to be TUI application so I can also
+write a NVim plugin for it in the future.
 
 ### Command Line Options
 
