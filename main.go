@@ -249,21 +249,20 @@ func validateTerminal(terminal string) error {
 func getTerminalArgs(terminal string) []string {
 	switch terminal {
 	case "kitty":
-		return []string{"-e", "tmux", "attach-session", "-t"}
+		return []string{"--detach", "-e", "tmux", "attach-session", "-t"}
 	case "alacritty":
-		return []string{"-e", "tmux", "attach-session", "-t"}
+		return []string{"--detach", "-e", "tmux", "attach-session", "-t"}
 	case "gnome-terminal":
-		return []string{"--", "tmux", "attach-session", "-t"}
+		return []string{"--detach", "--", "tmux", "attach-session", "-t"}
 	case "xterm":
 		return []string{"-e", "tmux", "attach-session", "-t"}
 	case "konsole":
-		return []string{"-e", "tmux", "attach-session", "-t"}
+		return []string{"--detach", "-e", "tmux", "attach-session", "-t"}
 	case "terminator":
 		return []string{"-e", "tmux", "attach-session", "-t"}
 	case "tilix":
-		return []string{"-e", "tmux", "attach-session", "-t"}
+		return []string{"--new-session", "-e", "tmux", "attach-session", "-t"}
 	default:
-		// Default to -e flag for unknown terminals
 		return []string{"-e", "tmux", "attach-session", "-t"}
 	}
 }
