@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -27,18 +28,18 @@ type Session struct {
 type Pane struct {
 	ID           int    `json:"id"`
 	Command      string `json:"command"`
-	Position     string `json:"position"`      // "main", "left", "right", "up", "down"
-	Parent       int    `json:"parent"`        // ID of parent pane
-	SplitPercent int    `json:"split_percent"` // percentage for split (default 50)
-	Row          int    `json:"row"`           // Visual row position
-	Col          int    `json:"col"`           // Visual column position
-	Width        int    `json:"width"`         // Visual width
-	Height       int    `json:"height"`        // Visual height
+	Position     string `json:"position"`
+	Parent       int    `json:"parent"`
+	SplitPercent int    `json:"split_percent"`
+	Row          int    `json:"row"`
+	Col          int    `json:"col"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
 }
 
 type SessionTemplate struct {
 	Name        string `json:"name"`
-	Description string `json:"description,omitempty"` // Made optional
+	Description string `json:"description,omitempty"`
 	Panes       []Pane `json:"panes"`
 }
 
@@ -66,9 +67,11 @@ const (
 	actionDeleteTemplate
 )
 
-type tickMsg time.Time
-type refreshMsg struct{}
-type animationTickMsg time.Time
+type (
+	tickMsg          time.Time
+	refreshMsg       struct{}
+	animationTickMsg time.Time
+)
 
 type model struct {
 	sessions         []Session
@@ -97,9 +100,9 @@ type model struct {
 	editingPaneID    int
 	showTemplates    bool
 	previewMode      bool
+	shouldAttach     string // Session name to attach to before quitting
 }
 
-var terminalCmd string
 var (
 	primaryColor   = lipgloss.Color("1e66f5")
 	secondaryColor = lipgloss.Color("178299")
@@ -213,60 +216,6 @@ var (
 			Bold(true)
 )
 
-func getDefaultTerminal() string {
-	// Check environment variable first
-	if term := os.Getenv("LAYTMUX_TERMINAL"); term != "" {
-		return term
-	}
-
-	// Check common environment variables
-	if term := os.Getenv("TERMINAL"); term != "" {
-		return term
-	}
-
-	// Try to detect available terminals in order of preference
-	terminals := []string{"kitty", "alacritty", "gnome-terminal", "xterm", "konsole", "terminator", "tilix"}
-
-	for _, term := range terminals {
-		if _, err := exec.LookPath(term); err == nil {
-			return term
-		}
-	}
-
-	// Final fallback
-	return "xterm"
-}
-
-func validateTerminal(terminal string) error {
-	_, err := exec.LookPath(terminal)
-	if err != nil {
-		return fmt.Errorf("terminal '%s' not found in PATH", terminal)
-	}
-	return nil
-}
-
-// Function to get terminal-specific arguments
-func getTerminalArgs(terminal string) []string {
-	switch terminal {
-	case "kitty":
-		return []string{"--detach", "-e", "tmux", "attach-session", "-t"}
-	case "alacritty":
-		return []string{"--detach", "-e", "tmux", "attach-session", "-t"}
-	case "gnome-terminal":
-		return []string{"--detach", "--", "tmux", "attach-session", "-t"}
-	case "xterm":
-		return []string{"-e", "tmux", "attach-session", "-t"}
-	case "konsole":
-		return []string{"--detach", "-e", "tmux", "attach-session", "-t"}
-	case "terminator":
-		return []string{"-e", "tmux", "attach-session", "-t"}
-	case "tilix":
-		return []string{"--new-session", "-e", "tmux", "attach-session", "-t"}
-	default:
-		return []string{"-e", "tmux", "attach-session", "-t"}
-	}
-}
-
 func getConfigDir() string {
 	homeDir, _ := os.UserHomeDir()
 	return filepath.Join(homeDir, ".config", "lazytmux")
@@ -294,14 +243,14 @@ func loadTemplates() []SessionTemplate {
 
 func saveTemplates(templates []SessionTemplate) error {
 	configDir := getConfigDir()
-	os.MkdirAll(configDir, 0755)
+	os.MkdirAll(configDir, 0o755)
 
 	data, err := json.MarshalIndent(templates, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return ioutil.WriteFile(getTemplatesFile(), data, 0644)
+	return ioutil.WriteFile(getTemplatesFile(), data, 0o644)
 }
 
 func tick() tea.Cmd {
@@ -372,7 +321,6 @@ func generateNumericName(existing []Session) string {
 	return "0"
 }
 
-// Check if a name already exists in sessions or templates
 func nameExists(name string, sessions []Session, templates []SessionTemplate) bool {
 	for _, s := range sessions {
 		if s.Name == name {
@@ -387,7 +335,6 @@ func nameExists(name string, sessions []Session, templates []SessionTemplate) bo
 	return false
 }
 
-// Find template by name prefix
 func findTemplateByPrefix(name string, templates []SessionTemplate) *SessionTemplate {
 	for _, t := range templates {
 		if t.Name == name {
@@ -397,14 +344,18 @@ func findTemplateByPrefix(name string, templates []SessionTemplate) *SessionTemp
 	return nil
 }
 
-func attachSession(name string) {
-	args := getTerminalArgs(terminalCmd)
-	args = append(args, name)
-
-	cmd := exec.Command(terminalCmd, args...)
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to launch terminal: %v\n", err)
+// Modified to use syscall.Exec to replace current process with tmux attach
+func attachSession(name string) error {
+	tmuxPath, err := exec.LookPath("tmux")
+	if err != nil {
+		return fmt.Errorf("tmux not found in PATH: %v", err)
 	}
+
+	args := []string{"tmux", "attach-session", "-t", name}
+	env := os.Environ()
+
+	// Replace current process with tmux attach
+	return syscall.Exec(tmuxPath, args, env)
 }
 
 func killSession(name string) error {
@@ -424,7 +375,6 @@ func createSession(name string) error {
 }
 
 func createSessionFromTemplate(sessionName string, template SessionTemplate) error {
-	// Create base session
 	if err := createSession(sessionName); err != nil {
 		return err
 	}
@@ -433,7 +383,6 @@ func createSessionFromTemplate(sessionName string, template SessionTemplate) err
 		return nil
 	}
 
-	// Lookup initial (only) pane id
 	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}").Output()
 	if err != nil {
 		return err
@@ -442,17 +391,14 @@ func createSessionFromTemplate(sessionName string, template SessionTemplate) err
 	idMap := map[int]string{}
 	idMap[template.Panes[0].ID] = baseID
 
-	// Command for first pane
 	if cmd := strings.TrimSpace(template.Panes[0].Command); cmd != "" {
 		_ = exec.Command("tmux", "send-keys", "-t", baseID, cmd, "C-m").Run()
 	}
 
-	// Create others in the given order, always selecting parent before split
 	for i := 1; i < len(template.Panes); i++ {
 		p := template.Panes[i]
 		parentID, ok := idMap[p.Parent]
 		if !ok {
-			// Fallback: split the first pane
 			parentID = baseID
 		}
 
@@ -461,15 +407,14 @@ func createSessionFromTemplate(sessionName string, template SessionTemplate) err
 		case "left", "right":
 			args = append(args, "-h")
 			if p.Position == "left" {
-				args = append(args, "-b") // place on the left of parent
+				args = append(args, "-b")
 			}
 		case "up", "down":
 			args = append(args, "-v")
 			if p.Position == "up" {
-				args = append(args, "-b") // place above parent
+				args = append(args, "-b")
 			}
 		default:
-			// default to vertical split
 			args = append(args, "-h")
 		}
 
@@ -477,7 +422,6 @@ func createSessionFromTemplate(sessionName string, template SessionTemplate) err
 			args = append(args, "-p", strconv.Itoa(p.SplitPercent))
 		}
 
-		// Print new pane id
 		args = append(args, "-P", "-F", "#{pane_id}")
 
 		newOut, err := exec.Command("tmux", args...).Output()
@@ -492,7 +436,6 @@ func createSessionFromTemplate(sessionName string, template SessionTemplate) err
 		}
 	}
 
-	// Focus original pane
 	_ = exec.Command("tmux", "select-pane", "-t", baseID).Run()
 	return nil
 }
@@ -520,7 +463,6 @@ func max(a, b int) int {
 	return b
 }
 
-// Calculate visual layout positions for panes
 func (m *model) calculatePaneLayout() {
 	if len(m.currentTemplate.Panes) == 0 {
 		return
@@ -628,7 +570,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "enter", " ":
 				if len(m.sessions) > 0 {
-					attachSession(m.sessions[m.cursor].Name)
+					m.shouldAttach = m.sessions[m.cursor].Name
 					return m, tea.Quit
 				}
 			case "n", "c":
@@ -694,20 +636,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "enter", " ":
 				if len(m.templates) > 0 {
-					// Create session from template
 					template := m.templates[m.templateCursor]
 					sessionName := fmt.Sprintf("%s-%d", template.Name, time.Now().Unix())
 
 					if err := createSessionFromTemplate(sessionName, template); err != nil {
 						m.setMessage(fmt.Sprintf("Failed to create session from template: %v", err), "error")
 					} else {
-						m.setMessage(fmt.Sprintf("Created session '%s' from template '%s'", sessionName, template.Name), "success")
-						attachSession(sessionName)
+						m.shouldAttach = sessionName
 						return m, tea.Quit
 					}
 				}
 			case "n", "c":
-				// Create new template
 				m.currentTemplate = SessionTemplate{
 					Name:        "",
 					Description: "",
@@ -784,7 +723,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						break
 					}
 
-					// Check for duplicate names
 					if nameExists(name, m.sessions, m.templates) {
 						m.setMessage("Name already exists", "error")
 						break
@@ -793,14 +731,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.input.Blur()
 					m.descriptionInput.Focus()
 				} else {
-					// Save template
 					name := strings.TrimSpace(m.input.Value())
 					if name == "" {
 						m.setMessage("Template name cannot be empty", "error")
 						break
 					}
 
-					// Check for duplicate names again
 					if nameExists(name, m.sessions, m.templates) {
 						m.setMessage("Name already exists", "error")
 						break
@@ -867,7 +803,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.calculatePaneLayout()
 				}
 			case "s":
-				// Save template
 				for i, template := range m.templates {
 					if template.Name == m.currentTemplate.Name {
 						m.templates[i] = m.currentTemplate
@@ -889,7 +824,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			switch msg.String() {
 			case "enter":
-				// Update pane command
 				for i := range m.currentTemplate.Panes {
 					if m.currentTemplate.Panes[i].ID == m.editingPaneID {
 						m.currentTemplate.Panes[i].Command = strings.TrimSpace(m.commandInput.Value())
@@ -914,29 +848,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						val = generateNumericName(m.sessions)
 					}
 
-					// Check if session name matches a template prefix
 					template := findTemplateByPrefix(val, m.templates)
 					if template != nil {
-						// Create session from template
 						if err := createSessionFromTemplate(val, *template); err != nil {
 							m.setMessage(fmt.Sprintf("Failed to create session from template: %v", err), "error")
 						} else {
-							m.setMessage(fmt.Sprintf("Created session '%s' from template '%s'", val, template.Name), "success")
-							attachSession(val)
+							m.shouldAttach = val
 							return m, tea.Quit
 						}
 					} else {
-						// Create regular session
 						if err := createSession(val); err != nil {
 							m.setMessage(fmt.Sprintf("Failed to create session: %v", err), "error")
 						} else {
-							m.setMessage(fmt.Sprintf("Created session '%s'", val), "success")
-							attachSession(val)
+							m.shouldAttach = val
 							return m, tea.Quit
 						}
 					}
 				} else if m.mode == renaming && val != "" {
-					// Check for duplicate names
 					if nameExists(val, m.sessions, m.templates) {
 						m.setMessage("Name already exists", "error")
 						break
@@ -1020,13 +948,11 @@ func (m *model) addPane(direction string) {
 		return
 	}
 
-	// Find selected pane
 	if m.paneCursor < 0 || m.paneCursor >= len(m.currentTemplate.Panes) {
 		m.paneCursor = 0
 	}
 	sel := &m.currentTemplate.Panes[m.paneCursor]
 
-	// Next unique ID
 	newID := 1
 	for _, p := range m.currentTemplate.Panes {
 		if p.ID >= newID {
@@ -1049,7 +975,6 @@ func (m *model) addPane(direction string) {
 
 	switch direction {
 	case "left":
-		// vertical split; new pane occupies left portion
 		newW := sel.Width * split / 100
 		if newW < 1 {
 			newW = 1
@@ -1070,7 +995,6 @@ func (m *model) addPane(direction string) {
 		sel.Width = rem
 
 	case "right":
-		// vertical split; new pane occupies right portion
 		newW := sel.Width * split / 100
 		if newW < 1 {
 			newW = 1
@@ -1090,7 +1014,6 @@ func (m *model) addPane(direction string) {
 		sel.Width = rem
 
 	case "up":
-		// horizontal split; new pane occupies upper portion
 		newH := sel.Height * split / 100
 		if newH < 1 {
 			newH = 1
@@ -1111,7 +1034,6 @@ func (m *model) addPane(direction string) {
 		sel.Height = rem
 
 	case "down":
-		// horizontal split; new pane occupies lower portion
 		newH := sel.Height * split / 100
 		if newH < 1 {
 			newH = 1
@@ -1132,11 +1054,7 @@ func (m *model) addPane(direction string) {
 	}
 
 	m.currentTemplate.Panes = append(m.currentTemplate.Panes, newPane)
-
-	// Optionally focus the newly created pane in the editor
 	m.paneCursor = len(m.currentTemplate.Panes) - 1
-
-	// Clamp
 	m.calculatePaneLayout()
 }
 
@@ -1152,7 +1070,6 @@ func (m model) View() string {
 		return m.renderTemplateView(tableWidth)
 	}
 
-	// Regular session view
 	if len(m.sessions) == 0 {
 		emptyMsg := lipgloss.NewStyle().
 			Foreground(mutedColor).
@@ -1307,7 +1224,6 @@ func (m model) View() string {
 func (m model) renderTemplateView(tableWidth int) string {
 	var content strings.Builder
 
-	// Title
 	title := templateHeaderStyle.Width(tableWidth).Render("🚀 SESSION TEMPLATES")
 	content.WriteString(lipgloss.Place(m.width, 1, lipgloss.Center, lipgloss.Top, title))
 	content.WriteString("\n\n")
@@ -1320,7 +1236,6 @@ func (m model) renderTemplateView(tableWidth int) string {
 		content.WriteString(lipgloss.Place(m.width, 1, lipgloss.Center, lipgloss.Top, emptyMsg))
 		content.WriteString("\n\n")
 	} else {
-		// Template list
 		for i, template := range m.templates {
 			isSelected := m.templateCursor == i && (m.mode == templateBrowsing)
 
@@ -1368,7 +1283,6 @@ func (m model) renderTemplateView(tableWidth int) string {
 		}
 	}
 
-	// Handle different modes
 	switch m.mode {
 	case templateCreating:
 		var inputPrompt string
@@ -1394,7 +1308,6 @@ func (m model) renderTemplateView(tableWidth int) string {
 		content.WriteString(lipgloss.Place(m.width, 7, lipgloss.Center, lipgloss.Center, confirmView))
 	}
 
-	// Status and help for templates
 	if m.message != "" {
 		var msgStyle lipgloss.Style
 		switch m.messageType {
@@ -1412,7 +1325,6 @@ func (m model) renderTemplateView(tableWidth int) string {
 		content.WriteString("\n")
 	}
 
-	// Template status bar
 	var statusItems []string
 	statusItems = append(statusItems, fmt.Sprintf("📋 Templates: %d", len(m.templates)))
 	if m.previewMode {
@@ -1487,12 +1399,9 @@ func (m model) renderTemplateView(tableWidth int) string {
 	return baseStyle.Render(content.String())
 }
 
-// Replace your existing renderTemplateEditor() with this version.
-// It draws a scaled ASCII grid of the template's panes and highlights the selected pane.
 func (m model) renderTemplateEditor() string {
 	var content strings.Builder
 
-	// Title
 	title := fmt.Sprintf("✏️ Editing: %s", m.currentTemplate.Name)
 	content.WriteString(lipgloss.NewStyle().
 		Foreground(templateColor).
@@ -1500,7 +1409,6 @@ func (m model) renderTemplateEditor() string {
 		Render(title))
 	content.WriteString("\n\n")
 
-	// Determine layout bounds (dynamic - scale to content)
 	maxRow, maxCol := 1, 1
 	for _, p := range m.currentTemplate.Panes {
 		if rr := p.Row + p.Height; rr > maxRow {
@@ -1517,11 +1425,9 @@ func (m model) renderTemplateEditor() string {
 		maxCol = 1
 	}
 
-	// Preview canvas size (characters). Adjust these if you want a bigger/smaller editor.
-	const pr = 12 // preview rows (height)
-	const pc = 48 // preview cols (width)
+	const pr = 12
+	const pc = 48
 
-	// Initialize the canvas with spaces
 	grid := make([][]rune, pr)
 	for r := 0; r < pr; r++ {
 		grid[r] = make([]rune, pc)
@@ -1530,7 +1436,6 @@ func (m model) renderTemplateEditor() string {
 		}
 	}
 
-	// Helper to keep coords sane
 	clip := func(v, lo, hi int) int {
 		if v < lo {
 			return lo
@@ -1541,15 +1446,12 @@ func (m model) renderTemplateEditor() string {
 		return v
 	}
 
-	// Draw each pane as a box on the canvas
-	for idx, pane := range m.currentTemplate.Panes {
-		// Map template coordinates -> preview coordinates (inclusive/exclusive)
+	for _, pane := range m.currentTemplate.Panes {
 		r0 := pane.Row * pr / maxRow
 		r1 := (pane.Row + pane.Height) * pr / maxRow
 		c0 := pane.Col * pc / maxCol
 		c1 := (pane.Col + pane.Width) * pc / maxCol
 
-		// Ensure minimum size to draw a box
 		if r1 <= r0+1 {
 			r1 = clip(r0+3, 0, pr)
 		}
@@ -1569,7 +1471,6 @@ func (m model) renderTemplateEditor() string {
 			c1 = pc
 		}
 
-		// Choose border style for selected pane (double lines) vs others (single)
 		var (
 			hChar, vChar   rune = '─', '│'
 			tl, tr, bl, br rune = '┌', '┐', '└', '┘'
@@ -1580,7 +1481,6 @@ func (m model) renderTemplateEditor() string {
 			tl, tr, bl, br = '╔', '╗', '╚', '╝'
 		}
 
-		// Top and bottom horizontal lines
 		for c := c0 + 1; c < c1-1; c++ {
 			if r0 >= 0 && r0 < pr && c >= 0 && c < pc {
 				grid[r0][c] = hChar
@@ -1590,7 +1490,6 @@ func (m model) renderTemplateEditor() string {
 			}
 		}
 
-		// Left and right vertical lines
 		for r := r0 + 1; r < r1-1; r++ {
 			if c0 >= 0 && c0 < pc && r >= 0 && r < pr {
 				grid[r][c0] = vChar
@@ -1600,7 +1499,6 @@ func (m model) renderTemplateEditor() string {
 			}
 		}
 
-		// Corners
 		if r0 >= 0 && r0 < pr && c0 >= 0 && c0 < pc {
 			grid[r0][c0] = tl
 		}
@@ -1614,18 +1512,16 @@ func (m model) renderTemplateEditor() string {
 			grid[r1-1][c1-1] = br
 		}
 
-		// Fill interior with spaces (already spaces) and write the command on the first interior line
 		cmd := strings.TrimSpace(pane.Command)
 		if cmd == "" {
 			cmd = "(empty)"
 		}
 		rText := r0 + 1
 		cTextStart := c0 + 1
-		maxTextWidth := (c1 - 1) - (c0 + 1) // interior width
+		maxTextWidth := (c1 - 1) - (c0 + 1)
 		if maxTextWidth < 0 {
 			maxTextWidth = 0
 		}
-		// Truncate command to fit
 		cmdRunes := []rune(cmd)
 		if len(cmdRunes) > maxTextWidth {
 			cmdRunes = cmdRunes[:maxTextWidth]
@@ -1637,7 +1533,6 @@ func (m model) renderTemplateEditor() string {
 			}
 		}
 
-		// If the pane is selected, add a small marker in its top-right interior (visual cue)
 		if m.mode == templateEditing && m.paneCursor < len(m.currentTemplate.Panes) && m.currentTemplate.Panes[m.paneCursor].ID == pane.ID {
 			mrkR := r0 + 1
 			mrkC := c1 - 3
@@ -1645,12 +1540,8 @@ func (m model) renderTemplateEditor() string {
 				grid[mrkR][mrkC] = '●'
 			}
 		}
-
-		// Prevent accidental overlap garbling: when drawing later panes, they will overwrite earlier characters.
-		_ = idx // keep in case you want per-pane behavior later
 	}
 
-	// Render the canvas rows into a string
 	content.WriteString("\n")
 	for r := 0; r < pr; r++ {
 		content.WriteString(string(grid[r]))
@@ -1658,18 +1549,14 @@ func (m model) renderTemplateEditor() string {
 	}
 	content.WriteString("\n")
 
-	// Add editor command hints (compact)
 	hints := "Commands: [H/J/K/L] Split selected • [Enter/e] Edit command • [d] Delete pane • [s] Save • [Esc] Back"
 	content.WriteString(hints)
 
-	// Use same box style as before for consistency
 	return inputBoxStyle.Width(80).Render(content.String())
 }
 
 func main() {
-	// Define command line flags
 	var (
-		terminal    = flag.String("t", "", "Terminal emulator to use (e.g., kitty, alacritty, gnome-terminal)")
 		showHelp    = flag.Bool("h", false, "Show help")
 		showVersion = flag.Bool("v", false, "Show version")
 	)
@@ -1679,15 +1566,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "A modern TUI for managing tmux sessions and templates.\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nTerminal Detection:\n")
-		fmt.Fprintf(os.Stderr, "  1. Command line flag (-t)\n")
-		fmt.Fprintf(os.Stderr, "  2. LAYTMUX_TERMINAL environment variable\n")
-		fmt.Fprintf(os.Stderr, "  3. TERMINAL environment variable\n")
-		fmt.Fprintf(os.Stderr, "  4. Auto-detect from: kitty, alacritty, gnome-terminal, xterm, konsole, terminator, tilix\n")
-		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  %s                          # Auto-detect terminal\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s -t alacritty             # Use alacritty\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  LAZYTMUX_TERMINAL=kitty %s  # Use environment variable\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "\nNote: This version attaches to sessions in the current terminal.\n")
+		fmt.Fprintf(os.Stderr, "The TUI will exit and you'll be attached to the selected session.\n")
 	}
 
 	flag.Parse()
@@ -1698,39 +1578,9 @@ func main() {
 	}
 
 	if *showVersion {
-		fmt.Println("lazytmux version 0.0.1")
+		fmt.Println("lazytmux version 0.0.2")
 		os.Exit(0)
 	}
-
-	// Determine which terminal to use
-	if *terminal != "" {
-		terminalCmd = *terminal
-	} else {
-		terminalCmd = getDefaultTerminal()
-	}
-
-	// Validate the terminal
-	if err := validateTerminal(terminalCmd); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Run '%s -h' for help on terminal detection.\n", os.Args[0])
-
-		// Show available terminals
-		fmt.Fprintf(os.Stderr, "\nTrying to find available terminals...\n")
-		terminals := []string{"kitty", "alacritty", "gnome-terminal", "xterm", "konsole", "terminator", "tilix"}
-		found := false
-		for _, term := range terminals {
-			if _, err := exec.LookPath(term); err == nil {
-				fmt.Fprintf(os.Stderr, "  ✓ %s (available)\n", term)
-				found = true
-			}
-		}
-		if !found {
-			fmt.Fprintf(os.Stderr, "  No supported terminals found in PATH\n")
-		}
-		os.Exit(1)
-	}
-
-	fmt.Printf("Using terminal: %s\n", terminalCmd)
 
 	sessions := listTmuxSessions()
 	templates := loadTemplates()
@@ -1752,8 +1602,20 @@ func main() {
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	if err := p.Start(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
+	}
+
+	// After TUI exits, check if we should attach to a session
+	if finalModel, ok := finalModel.(model); ok {
+		if finalModel.shouldAttach != "" {
+			// Attach to the session using syscall.Exec
+			if err := attachSession(finalModel.shouldAttach); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to attach to session: %v\n", err)
+				os.Exit(1)
+			}
+		}
 	}
 }
