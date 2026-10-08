@@ -104,19 +104,24 @@ type model struct {
 }
 
 var (
-	primaryColor   = lipgloss.Color("1e66f5")
-	secondaryColor = lipgloss.Color("178299")
-	accentColor    = lipgloss.Color("e64553")
-	warningColor   = lipgloss.Color("df8e1d")
-	dangerColor    = lipgloss.Color("fe640b")
-	mutedColor     = lipgloss.Color("7287fd")
-	successColor   = lipgloss.Color("40a02b")
-	templateColor  = lipgloss.Color("8839ef")
+
+	// ANSI palette colors: these follow the terminal's theme
+	primaryColor   = lipgloss.Color("4")  // blue
+	secondaryColor = lipgloss.Color("6")  // cyan
+	accentColor    = lipgloss.Color("1")  // red
+	warningColor   = lipgloss.Color("3")  // yellow
+	dangerColor    = lipgloss.Color("9")  // bright red
+	mutedColor     = lipgloss.Color("8")  // bright black (gray)
+	successColor   = lipgloss.Color("2")  // green
+	templateColor  = lipgloss.Color("5")  // magenta
+
+	// Terminal's default foreground (no color escape emitted)
+	textColor lipgloss.TerminalColor = lipgloss.NoColor{}
 
 	baseStyle = lipgloss.NewStyle().Padding(1, 2)
 
 	tableHeaderStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("16")).
+				Foreground(textColor).
 				Bold(true).
 				Padding(0, 2).
 				Align(lipgloss.Center).
@@ -125,7 +130,7 @@ var (
 				BorderForeground(primaryColor)
 
 	templateHeaderStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("16")).
+				Foreground(textColor).
 				Bold(true).
 				Padding(0, 2).
 				Align(lipgloss.Center).
@@ -134,14 +139,14 @@ var (
 				BorderForeground(templateColor)
 
 	selectedRowStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("16")).
+				Foreground(textColor).
 				Bold(true).
 				Padding(0, 1).
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(primaryColor)
 
 	selectedTemplateStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("16")).
+				Foreground(textColor).
 				Bold(true).
 				Padding(0, 1).
 				Border(lipgloss.RoundedBorder()).
@@ -162,13 +167,13 @@ var (
 			Padding(1, 2).
 			Margin(1, 0).
 			Width(60).
-			Foreground(lipgloss.Color("16"))
+			Foreground(textColor)
 
 	previewBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(templateColor).
 			Padding(1, 2).
-			Foreground(lipgloss.Color("16"))
+			Foreground(textColor)
 
 	paneStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
@@ -1170,7 +1175,7 @@ func (m model) View() string {
 
 	statusBarText := strings.Join(statusItems, " • ")
 	statusBar := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("16")).
+		Foreground(textColor).
 		Padding(0, 2).
 		Border(lipgloss.RoundedBorder()).
 		BorderTop(true).
@@ -1206,7 +1211,7 @@ func (m model) View() string {
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(accentColor).
 				Render(shortcut[0])
-			desc := lipgloss.NewStyle().Foreground(lipgloss.Color("16")).Render(shortcut[1])
+			desc := lipgloss.NewStyle().Foreground(textColor).Render(shortcut[1])
 			helpContent.WriteString(fmt.Sprintf("%s  %s\n", key, desc))
 		}
 		helpBox := lipgloss.NewStyle().
@@ -1242,7 +1247,7 @@ func (m model) renderTemplateView(tableWidth int) string {
 			rowStyle := selectedTemplateStyle.Copy().Padding(0, 1)
 			if !isSelected {
 				rowStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("16")).
+					Foreground(textColor).
 					Padding(0, 1).
 					Border(lipgloss.RoundedBorder()).
 					BorderForeground(mutedColor)
@@ -1334,7 +1339,7 @@ func (m model) renderTemplateView(tableWidth int) string {
 
 	statusBarText := strings.Join(statusItems, " • ")
 	statusBar := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("16")).
+		Foreground(textColor).
 		Padding(0, 2).
 		Border(lipgloss.RoundedBorder()).
 		BorderTop(true).
@@ -1383,7 +1388,7 @@ func (m model) renderTemplateView(tableWidth int) string {
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(accentColor).
 				Render(shortcut[0])
-			desc := lipgloss.NewStyle().Foreground(lipgloss.Color("16")).Render(shortcut[1])
+			desc := lipgloss.NewStyle().Foreground(textColor).Render(shortcut[1])
 			helpContent.WriteString(fmt.Sprintf("%s  %s\n", key, desc))
 		}
 

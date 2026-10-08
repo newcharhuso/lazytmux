@@ -14,7 +14,7 @@ but I thought this could be useful to others too so you are here now.
 
 - [tmux](https://github.com/tmux/tmux) installed and accessible in PATH
 - [Go](https://golang.org/) 1.19 or later (for building from source)
-- A supported terminal emulator (kitty, alacritty, gnome-terminal, xterm, konsole, terminator, tilix)
+ A supported terminal emulator (kitty, alacritty, etc.) 
 
 ## Installation
 
@@ -51,49 +51,7 @@ Show help and supported options:
 
 #### The way I use it
 
-My main terminal is Kitty so I installed Foot terminal alongside it to use it tool. I use this Hyprland keybind:
-
-```
-bind = $mainMod, t, exec, foot
-```
-
-and 2 windowrules:
-
-```
-windowrule = float , class:^(foot)$
-windowrule = size 1031 568 center, class:^(foot)$
-```
-
-and in my .zshrc:
-
-```
-source /home/husnu/nixos/modules/tmux/tmux_session_trigger.sh
-```
-
-This way it launches as a floating window and automatically closes after I attach a session.
-I know this is not practical setup but I wanted it to be TUI application so I can also
-write a NVim plugin for it in the future.
-
-### Command Line Options
-
-| Flag            | Description               | Example        |
-| --------------- | ------------------------- | -------------- |
-| `-t <terminal>` | Specify terminal emulator | `-t alacritty` |
-| `-h`            | Show help message         |                |
-| `-v`            | Show version information  |                |
-
-### Supported Terminals
-
-The program supports the following terminal emulators by default, this is only for attaching the session to that terminal emulator,
-the default attach command is {selected terminal} -e tmux attach-session -t {session name}:
-
-- **kitty** (default)
-- **alacritty**
-- **gnome-terminal**
-- **xterm**
-- **konsole**
-- **terminator**
-- **tilix**
+Just call the executable from .bashrc (or the corresponding to your shell)
 
 ## Key Features
 
@@ -202,21 +160,6 @@ Configuration files are stored in `~/.config/lazytmux/`:
 
 The configuration directory is created automatically on first run.
 
-### Environment Variables
-
-You can set these environment variables to configure behavior:
-
-- `LAYTMUX_TERMINAL`: Your preferred terminal emulator
-- `TERMINAL`: System-wide terminal preference (fallback)
-
-Examples:
-
-```bash
-# Set in your shell profile (.bashrc, .zshrc, etc.)
-export LAYTMUX_TERMINAL=alacritty
-
-# Or use for a single session
-LAYTMUX_TERMINAL=kitty .lazytmux/
 ```
 
 ## Dependencies
